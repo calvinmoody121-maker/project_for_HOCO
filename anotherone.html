@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ASU Sparky Filter</title>
+    
+    <!-- CSS is included directly in the HTML -->
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        .container {
+            position: relative;
+            width: 640px;
+            height: 480px;
+            border: 2px solid #333;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            background-color: #000;
+        }
+
+        canvas {
+            /* Flip the canvas horizontally to create a mirror effect */
+            transform: scaleX(-1);
+            width: 100%;
+            height: 100%;
+        }
+
+        /* --- New Gemini Feature Styles --- */
+        
+        #pep-talk-button {
+            background-color: #8C1D40; /* ASU Maroon */
+            color: #FFC627; /* ASU Gold */
+            border: 2px solid #FFC627;
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-top: 20px;
+        }
+
+        #pep-talk-button:hover {
+            background-color: #FFC627;
+            color: #8C1D40;
+        }
+
+        #pep-talk-button:disabled {
+            background-color: #555;
+            color: #aaa;
+            border-color: #777;
+            cursor: not-allowed;
+        }
+        
+        #message-box {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 500px;
+            background-color: white;
+            border: 3px solid #8C1D40;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            z-index: 100;
+            opacity: 1;
+            transition: opacity 0.3s ease, top 0.3s ease;
+        }
+
+        #message-box.hidden {
+            opacity: 0;
+            top: -100px;
+            pointer-events: none;
+        }
+
+        #message-box p {
+            font-size: 16px;
+            color: #333;
+            margin: 0;
+            line-height: 1.5;
+        }
+
+        #message-box-close {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 24px;
+            color: #aaa;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        #message-box-close:hover {
+            color: #333;
+        }
+
+    </style>
+</head>
+<body>
+    
+    <!-- Message box for Gemini response -->
+    <div id="message-box" class="hidden">
+        <span id="message-box-close">&times;</span>
+        <p id="message-box-text">Sparky is thinking...</p>
+    </div>
+
+    <h1>ASU Sparky Filter</h1>
+    <div class="container">
+        
+        <!-- The canvas is where we'll draw the video and the filter -->
+        <canvas id="output"></canvas>
+        
+        <!-- The video element is hidden but provides the raw feed -->
+        <video id="video" playsinline style="display: none;"></video>
+    </div>
+
+    
+    <!-- Button to trigger Gemini API -->
+    <button id="pep-talk-button">✨ Get Sparky's Pep Talk!</button>
+
+    
+    <!-- 1. Load TensorFlow.js (core) -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+
+    
+    <!-- 2. Load the POSE detection model (MoveNet) -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+
+    
+    <!-- 3. Load the FACE detection model -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
+    
+    
+    <!-- JavaScript Application Logic -->
+    <script>
+        
+        // --- MODIFICATION: Moved all DOM element vars inside main() ---
+        let video;
+        let canvas;
+        let ctx; 
+
+        const VIDEO_WIDTH = 640;
+        const VIDEO_HEIGHT = 480;
+        
+        // --- Sparky SVG Assets ---
+        // We define the art as text (SVG) and will load it into images
+        const ASU_MAROON = "#8C1D40";
+        const ASU_GOLD = "#FFC627";
+        const MOUTH_OPEN_THRESHOLD = 5; // How many pixels lips must be apart to count as "open"
+
+        // --- API Constants ---
+        const apiKey = ""; // Leave as-is, will be populated by the environment
+        
+        // Reverted to the free-tier Gemini model to avoid 403 errors
+        const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+        // SVG for Sparky's head with a closed mouth
+        const SPK_HEAD_CLOSED_SVG = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
+            <path fill="${ASU_MAROON}" d="M20,80 Q50,95 80,80 Q90,50 80,20 Q50,5 20,20 Q10,50 20,80 Z" />
+            <path fill="${ASU_GOLD}" d="M25,75 Q50,85 75,75 Q60,65 50,60 Q40,65 25,75 Z" /> <!-- Mouth -->
+            <path fill="${ASU_GOLD}" d="M30,25 Q35,15 40,25 Q35,30 30,25 Z" /> <!-- Eye -->
+            <path fill="${ASU_GOLD}" d="M60,25 Q65,15 70,25 Q65,30 60,25 Z" /> <!-- Eye -->
+            <path fill="${ASU_GOLD}" d="M15,20 Q20,5 30,15 Z" /> <!-- Horn -->
+            <path fill="${ASU_GOLD}" d="M85,20 Q80,5 70,15 Z" /> <!-- Horn -->
+        </svg>`;
+
+        // SVG for Sparky's head with an open mouth
+        const SPK_HEAD_OPEN_SVG = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
+            <path fill="${ASU_MAROON}" d="M20,80 Q50,95 80,80 Q90,50 80,20 Q50,5 20,20 Q10,50 20,80 Z" />
+            <path fill="#000" d="M25,75 Q50,85 75,75 Q70,55 50,50 Q30,55 25,75 Z" /> <!-- Open Mouth -->
+            <path fill="${ASU_GOLD}" d="M30,25 Q35,15 40,25 Q35,30 30,25 Z" /> <!-- Eye -->
+            <path fill="${ASU_GOLD}" d="M60,25 Q65,15 70,25 Q65,30 60,25 Z" /> <!-- Eye -->
+            <path fill="${ASU_GOLD}" d="M15,20 Q20,5 30,15 Z" /> <!-- Horn -->
+            <path fill="${ASU_GOLD}" d="M85,20 Q80,5 70,15 Z" /> <!-- Horn -->
+        </svg>`;
+
+        // SVG for Sparky's torso
+        const SPK_TORSO_SVG = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="100" height="120" viewBox="0 0 100 120">
+            <path fill="${ASU_MAROON}" d="M10,0 L90,0 Q100,10 90,20 L75,110 Q50,120 25,110 L10,20 Q0,10 10,0 Z" />
+            <path fill="${ASU_GOLD}" d="M30,40 L70,40 L70,80 L30,80 Z" /> <!-- Gold 'ASU' box, simplified -->
+        </svg>`;
+
+        // SVG for Sparky's upper arm
+        const SPK_UPPER_ARM_SVG = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="30" height="80" viewBox="0 0 30 80">
+            <rect fill="${ASU_MAROON}" width="30" height="80" rx="15" />
+        </svg>`;
+        
+        // SVG for Sparky's lower arm + pitchfork
+        const SPK_LOWER_ARM_SVG = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="60" height="100" viewBox="0 0 60 100">
+            <!-- Arm -->
+            <rect fill="${ASU_MAROON}" x="15" y="0" width="30" height="80" rx="15" />
+            <!-- Pitchfork -->
+            <rect fill="${ASU_GOLD}" x="25" y="70" width="10" height="30" />
+            <path fill="${ASU_GOLD}" d="M0,70 L10,60 L10,75 Z" />
+            <path fill="${ASU_GOLD}" d="M25,55 L30,50 L35,55 Z" />
+            <path fill="${ASU_GOLD}" d="M50,70 L60,60 L60,75 Z" />
+        </svg>`;
+        
+        // This object will hold the loaded Image objects
+        let sparkyImages = {};
+        
+        // --- End Assets ---
+
+        let poseDetector;
+        let faceDetector;
+        
+        // --- NEW: Global error variable ---
+        let startupError = null;
+
+        // --- New API Functions ---
+
+        /**
+         * A wrapper for fetch that includes exponential backoff retries.
+         */
+        async function fetchWithBackoff(url, options, retries = 3, delay = 1000) {
+            try {
+                const response = await fetch(url, options);
+                if (!response.ok) {
+                    if (response.status === 429 && retries > 0) {
+                        // Throttled, wait and retry
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        return fetchWithBackoff(url, options, retries - 1, delay * 2);
+                    }
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            } catch (error) {
+                if (retries > 0) {
+                    // Network or other retryable error
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    return fetchWithBackoff(url, options, retries - 1, delay * 2);
+                }
+                console.error("Fetch failed after multiple retries:", error);
+                throw error;
+            }
+        }
+
+        /**
+         * Calls the Gemini API to get a pep talk from Sparky.
+         */
+        async function getPepTalk() {
+            const button = document.getElementById('pep-talk-button');
+            const messageBox = document.getElementById('message-box');
+            const messageText = document.getElementById('message-box-text');
+
+            // Set loading state
+            button.disabled = true;
+            button.textContent = "Sparky is thinking...";
+            messageText.textContent = "Sparky is thinking...";
+            messageBox.classList.remove('hidden');
+
+            const systemPrompt = "You are Sparky the Sun Devil, the mascot for Arizona State University. You are energetic, positive, motivational, and full of school spirit. You never say you're an AI. Keep your answers to 2-3 sentences. Always end your message with 'Go Devils!'";
+            const userQuery = "Give me a short, inspiring pep talk to help me get through my day.";
+
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                },
+            };
+
+            try {
+                const result = await fetchWithBackoff(GEMINI_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (text) {
+                    messageText.textContent = text;
+                    // TTS was removed due to 403 errors
+                } else {
+                    throw new Error("Invalid response from API.");
+                }
+
+            } catch (error) {
+                console.error("Error getting pep talk:", error);
+                messageText.textContent = "Uh oh! My pitchfork is stuck. Please try again in a moment.";
+            } finally {
+                // Restore button
+                button.disabled = false;
+                button.textContent = "✨ Get Sparky's Pep Talk!";
+            }
+        }
+        
+        // --- TTS functions removed ---
+
+        /**
+         * Loads an SVG string as a drawable Image object
+         */
+        function loadSVG(svgString) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = reject;
+                // Convert SVG text to a Base64 data URL
+                img.src = "data:image/svg+xml;base64," + btoa(svgString);
+            });
+        }
+
+        /**
+         * Loads all Sparky assets into Image objects
+         */
+        async function loadSparkyAssets() {
+            try {
+                console.log("Loading Sparky assets...");
+                [
+                    sparkyImages.headClosed,
+                    sparkyImages.headOpen,
+                    sparkyImages.torso,
+                    sparkyImages.upperArm,
+                    sparkyImages.lowerArm
+                ] = await Promise.all([
+                    loadSVG(SPK_HEAD_CLOSED_SVG),
+                    loadSVG(SPK_HEAD_OPEN_SVG),
+                    loadSVG(SPK_TORSO_SVG),
+                    loadSVG(SPK_UPPER_ARM_SVG),
+                    loadSVG(SPK_LOWER_ARM_SVG)
+                ]);
+                console.log("Sparky assets loaded.");
+            } catch (err) {
+                console.error("Failed to load SVG assets: ", err);
+                startupError = "Failed to load Sparky's image assets.";
+                throw err; // This will stop main() from continuing
+            }
+        }
+
+        async function setupCamera() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                startupError = "Your browser does not support webcam access.";
+                throw new Error("getUserMedia not supported");
+            }
+
+            video.width = VIDEO_WIDTH;
+            video.height = VIDEO_HEIGHT;
+
+            console.log("Requesting camera access...");
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    'audio': false,
+                    'video': {
+                        width: VIDEO_WIDTH,
+                        height: VIDEO_HEIGHT,
+                    },
+                });
+                video.srcObject = stream;
+            } catch (err) {
+                startupError = "Failed to access webcam. Please check permissions.";
+                throw err;
+            }
+
+            return new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    console.log("Video metadata loaded. Attempting to play...");
+                    video.play();
+                    resolve(video);
+                };
+            });
+        }
+
+        async function loadModels() {
+            try {
+                console.log("Loading models...");
+                // Load Pose model
+                const poseDetectorConfig = {
+                    modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
+                };
+                poseDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, poseDetectorConfig);
+
+                // Load Face model
+                const faceDetectorConfig = {
+                    runtime: 'mediapipe',
+                    solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh',
+                };
+                faceDetector = await faceLandmarksDetection.createDetector(faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh, faceDetectorConfig);
+                
+                console.log("All models loaded successfully.");
+            } catch (err) {
+                console.error("Failed to load models: ", err);
+                startupError = "Failed to load AI models. Check internet.";
+                throw err; // This will stop main() from continuing
+            }
+        }
+
+        async function detectionLoop() {
+            // --- MODIFIED detectionLoop for robust testing ---
+            
+            // This loop runs immediately, so ctx might be null at first
+            if (!ctx) {
+                // If main() hasn't initialized it, just wait.
+                // main() will call this loop again once ctx is ready.
+                requestAnimationFrame(detectionLoop);
+                return;
+            }
+
+            // 1. ALWAYS clear the canvas
+            ctx.clearRect(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+
+            // 2. ALWAYS draw the "Apple" test case
+            ctx.fillStyle = "white";
+            ctx.font = "24px Arial";
+            ctx.fillText("Apple", 50, 50); // Use 50, 50 to be visible
+            
+            // --- NEW: Draw startup error if it exists ---
+            if (startupError) {
+                ctx.fillStyle = "red";
+                ctx.font = "16px Arial";
+                ctx.fillText(`Error: ${startupError}`, 50, 140);
+            }
+
+            // 3. Now, try to draw the video and Sparky
+            if (poseDetector && faceDetector && video.readyState >= 3) {
+                let poses;
+                let faces;
+                try {
+                    // Detect both pose and face
+                    poses = await poseDetector.estimatePoses(video, { flipHorizontal: false });
+                    faces = await faceDetector.estimateFaces(video, { flipHorizontal: false });
+                
+                    // Draw the video frame
+                    ctx.drawImage(video, 0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+
+                    // Re-draw "Apple" on top of video
+                    ctx.fillStyle = "white";
+                    ctx.font = "24px Arial";
+                    ctx.fillText("Apple", 50, 50);
+
+                    // If a pose is found, draw Sparky
+                    if (poses && poses.length > 0) {
+                        drawSparky(poses[0], faces);
+                    }
+                } catch (err) {
+                    // If the draw loop itself fails, report it
+                    ctx.fillStyle = "red";
+                    ctx.font = "16px Arial";
+                    ctx.fillText("Error in draw loop: " + err.message, 50, 170);
+                    console.error("Error in draw loop:", err);
+                }
+            } else if (!startupError) {
+                // 4. Draw a status message if models/video aren't ready
+                ctx.fillStyle = "orange";
+                ctx.font = "18px Arial";
+                ctx.fillText("Waiting for models and camera...", 50, 100);
+            }
+
+            // 5. Keep the loop going
+            requestAnimationFrame(detectionLoop);
+        }
+
+        /**
+         * Main drawing function. Replaces the skeleton with Sparky!
+         */
+        function drawSparky(pose, faces) {
+            // --- NEW: Check if images are loaded ---
+            // This prevents the "Cannot read properties of undefined (reading 'width')" error
+            if (!sparkyImages.torso || !sparkyImages.headClosed) {
+                // Images not loaded yet, just skip drawing
+                return;
+            }
+
+            // Get keypoints as a named object for easy access
+            const K = pose.keypoints.reduce((acc, keypoint) => {
+                acc[keypoint.name] = keypoint;
+                return acc;
+            }, {});
+
+            // Confidence check: If we can't see the shoulders, don't draw
+            if (K.left_shoulder.score < 0.3 || K.right_shoulder.score < 0.3) {
+                return;
+            }
+
+            // --- 1. Mouth Logic ---
+            let sparkyHeadImage = sparkyImages.headClosed; // Default
+            if (faces && faces.length > 0) {
+                const face = faces[0];
+                // These keypoints are the middle of the outer top and bottom lips
+                const topLip = face.keypoints[13];
+                const bottomLip = face.keypoints[14];
+                const lipDistance = Math.abs(topLip.y - bottomLip.y);
+                
+                if (lipDistance > MOUTH_OPEN_THRESHOLD) {
+                    sparkyHeadImage = sparkyImages.headOpen;
+                }
+            }
+
+            // --- 2. Torso & Head Logic ---
+            const shoulderMidX = (K.left_shoulder.x + K.right_shoulder.x) / 2;
+            const shoulderMidY = (K.left_shoulder.y + K.right_shoulder.y) / 2;
+            const shoulderWidth = Math.abs(K.left_shoulder.x - K.right_shoulder.x);
+            
+            // Adjust scale based on shoulder width (crude depth perception)
+            const torsoScale = shoulderWidth / sparkyImages.torso.width * 2.5; // Original torso scale
+            
+            // The torsoDrawX and torsoDrawY are still calculated because the head positioning
+            // uses them as a reference.
+            const torsoWidth = sparkyImages.torso.width * torsoScale;
+            const torsoHeight = sparkyImages.torso.height * torsoScale; 
+            const torsoDrawX = shoulderMidX + 30; // Shift right by 30 pixels
+            const torsoDrawY = shoulderMidY + torsoHeight / 4 - 50; // Shift up for centering
+
+            /* --- Torso is hidden ---
+            drawLimb(
+                { x: torsoDrawX, y: torsoDrawY },
+                getAngle(K.left_shoulder, K.right_shoulder) + Math.PI / 2, // Add 90 deg to orient
+                sparkyImages.torso,
+                torsoWidth,
+                torsoHeight
+            );
+            */
+
+            // --- Draw Head ---
+            // Reduced headScale multiplier from 1.2 to 0.8
+            const headScale = torsoScale * 0.8; 
+            const headWidth = sparkyHeadImage.width * headScale;
+            const headHeight = sparkyHeadImage.height * headScale;
+            
+            // Position head relative to the adjusted torso's estimated top center
+            const headX = torsoDrawX;
+            const headY = torsoDrawY - headHeight * 0.7; // Position head above torso
+            
+            // --- Stable rotation logic ---
+            let headTilt = 0; // Default to 0
+            if (K.left_ear.score > 0.3 && K.right_ear.score > 0.3) {
+                headTilt = getAngle(K.left_ear, K.right_ear);
+            } else if (K.left_shoulder.score > 0.3 && K.right_shoulder.score > 0.3) {
+                // Fallback to shoulder tilt if ears aren't visible
+                headTilt = getAngle(K.left_shoulder, K.right_shoulder);
+            }
+            
+            // Check for invalid numbers
+            if (isNaN(headTilt)) {
+                headTilt = 0;
+            }
+
+            // Base upright angle (tilt + 90deg) + 90deg right turn
+            const headAngle = headTilt + (Math.PI / 2) + (Math.PI / 2); 
+
+            drawLimb(
+                { x: headX, y: headY },
+                headAngle, // Use the calculated angle
+                sparkyHeadImage,
+                headWidth,
+                headHeight
+            );
+
+
+            // --- Hiding Arm Logic (commented out) ---
+            /*
+            const armScale = torsoScale * 1.0; 
+            const upperArmWidth = sparkyImages.upperArm.width * armScale;
+            const upperArmHeight = sparkyImages.upperArm.height * armScale;
+            const lowerArmWidth = sparkyImages.lowerArm.width * armScale;
+            const lowerArmHeight = sparkyImages.lowerArm.height * armScale;
+            // Left Arm
+            if (K.left_elbow.score > 0.3) {
+                drawLimb(K.left_shoulder, getAngle(K.left_shoulder, K.left_elbow) + Math.PI / 2, sparkyImages.upperArm, upperArmWidth, upperArmHeight);
+                if (K.left_wrist.score > 0.3) {
+                    drawLimb(K.left_elbow, getAngle(K.left_elbow, K.left_wrist) + Math.PI / 2, sparkyImages.lowerArm, lowerArmWidth, lowerArmHeight);
+                }
+            }
+            // Right Arm
+            if (K.right_elbow.score > 0.3) {
+                drawLimb(K.right_shoulder, getAngle(K.right_shoulder, K.right_elbow) + Math.PI / 2, sparkyImages.upperArm, upperArmWidth, upperArmHeight);
+                if (K.right_wrist.score > 0.3) {
+                    drawLimb(K.right_elbow, getAngle(K.right_elbow, K.right_wrist) + Math.PI / 2, sparkyImages.lowerArm, lowerArmWidth, lowerArmHeight);
+                }
+            }
+            */
+        }
+
+        /**
+         * Helper to get angle between two points
+         */
+        function getAngle(p1, p2) {
+            return Math.atan2(p2.y - p1.y, p2.x - p1.x);
+        }
+
+        /**
+         * Helper function to draw a limb (image) at a specific point and rotation
+         */
+        function drawLimb(point, angle, image, width, height) {
+            ctx.save();
+            ctx.translate(point.x, point.y);
+            // The angle passed in is now the exact angle we want to use.
+            ctx.rotate(angle); 
+            // Draw image centered horizontally, and vertically *below* the pivot
+            ctx.drawImage(image, -width / 2, 0, width, height);
+            ctx.restore();
+        }
+
+// --- Main function ---
+        async function main() {
+            console.log("App started.");
+            
+            // --- MODIFICATION: Get elements inside main ---
+            canvas = document.getElementById('output');
+            video = document.getElementById('video');
+
+            if (!canvas || !video) {
+                console.error("CRITICAL: Canvas or Video element not found.");
+                startupError = "HTML elements not found.";
+                // Still start detection loop to show the error
+                detectionLoop();
+                return;
+            }
+
+            canvas.width = VIDEO_WIDTH;
+            canvas.height = VIDEO_HEIGHT;
+
+            ctx = canvas.getContext('2d');
+            if (!ctx) {
+                console.error("CRITICAL: Failed to get 2D context.");
+                startupError = "Failed to get 2D context.";
+            }
+
+            // Start the draw loop *after* ctx is initialized
+            console.log("Starting detection loop...");
+            detectionLoop(); 
+
+            // Now, try to load everything else
+            try {
+                await setupCamera();
+                await loadModels();
+                await loadSparkyAssets(); // Wait for images to be ready
+            
+                // --- Wire up new Gemini feature ---
+                document.getElementById('pep-talk-button').addEventListener('click', getPepTalk);
+                document.getElementById('message-box-close').addEventListener('click', () => {
+                    document.getElementById('message-box').classList.add('hidden');
+                });
+
+                console.log("Async setup complete.");
+            } catch (error) {
+                console.error("Critical error in main() function:", error);
+                // The error is already set by the failing function
+            }
+        }
+
+        // --- MODIFICATION: Wait for page load to run main ---
+        window.addEventListener('load', main);
+
+    </script>
+</body>
+</html>
+
