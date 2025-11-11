@@ -21,47 +21,62 @@
   <script src="https://unpkg.com/react-webcam@7.0.1/dist/react-webcam.min.js"></script>
   
   <style>
-    /* Custom scrollbar for better dark mode aesthetics */
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    /* Google Colors */
+    :root {
+      --google-blue: #4285F4;
+      --google-red: #EA4335;
+      --google-yellow: #FBBC05;
+      --google-green: #34A853;
+      --google-gray: #5F6368;
+      --google-dark: #202124;
+      --google-light-gray: #F8F9FA;
     }
+
+    body {
+      font-family: 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #FFFFFF;
+      color: #202124;
+    }
+
     ::-webkit-scrollbar {
       width: 8px;
     }
     ::-webkit-scrollbar-track {
-      background: #1f2937; /* bg-gray-800 */
+      background: #F8F9FA;
     }
     ::-webkit-scrollbar-thumb {
-      background: #4b5563; /* bg-gray-600 */
+      background: var(--google-gray);
       border-radius: 4px;
     }
     ::-webkit-scrollbar-thumb:hover {
-      background: #6b7280; /* bg-gray-500 */
+      background: var(--google-blue);
     }
-    .relative-container {
+
+    .webcam-container {
       position: relative;
       width: 100%;
       height: 100%;
     }
-    .webcam-canvas-overlay {
+
+    .webcam-overlay {
       position: absolute;
       top: 0;
       left: 0;
       width: 100%;
       height: 100%;
+      pointer-events: none;
     }
+
   </style>
 </head>
-<body class="bg-gray-900">
+<body>
   <noscript>You need to enable JavaScript to run this app.</noscript>
   <div id="root"></div>
 
-  <!-- This is our React application, written inside a script tag -->
   <script type="text/babel">
-    // Make React hooks available
     const { useState, useEffect, useRef, useCallback } = React;
 
-    // Define the connections for the hand skeleton
+    // Hand skeleton connections
     const handConnections = [
       [0, 1], [1, 2], [2, 3], [3, 4],         // Thumb
       [0, 5], [5, 6], [6, 7], [7, 8],         // Index
@@ -70,99 +85,259 @@
       [13, 17], [17, 18], [18, 19], [19, 20],  // Pinky
       [0, 17]                                  // Palm
     ];
-    
-    // Hand gesture images
-    const gestureImages = {
-      default: {
-        monkey: 'https://placehold.co/400x400/374151/e5e7eb?text=Show+a+Hand+Sign',
-        human: 'https://placehold.co/400x400/374151/e5e7eb?text=Show+a+Hand+Sign',
-      },
+
+    // ============================================
+    // GESTURE CONFIGURATION
+    // ============================================
+    // Add new gestures here - each gesture needs:
+    // - name: unique identifier
+    // - image: URL to the meme image
+    // - classifier: function that returns true when gesture is detected
+    // ============================================
+    const GESTURE_CONFIG = {
       point: {
-        monkey: 'https://media1.tenor.com/m/I9qt03YKkjQAAAAC/monkey-thinking.gif', 
-        human: 'https://i.imgur.com/rQ0Y0bS.jpeg', 
+        name: 'point',
+        image: 'https://media1.tenor.com/m/I9qt03YKkjQAAAAC/monkey-thinking.gif',
+        classifier: (landmarks) => {
+          const thumbTip = landmarks[4];
+          const indexTip = landmarks[8];
+          const middleTip = landmarks[12];
+          const ringTip = landmarks[16];
+          const pinkyTip = landmarks[20];
+          
+          const isIndexExtended = indexTip[1] < landmarks[6][1];
+          const isThumbCurled = thumbTip[0] > landmarks[5][0];
+          const isMiddleCurled = middleTip[1] > landmarks[10][1];
+          const isRingCurled = ringTip[1] > landmarks[14][1];
+          const isPinkyCurled = pinkyTip[1] > landmarks[18][1];
+          
+          return isThumbCurled && isIndexExtended && isMiddleCurled && isRingCurled && isPinkyCurled;
+        }
+      },
+      ok_sign: {
+        name: 'ok_sign',
+        image: 'https://t4.ftcdn.net/jpg/15/68/97/83/360_F_1568978321_JVKyawq58nNqd9mekQ4EEvm8MraRvVHZ.jpg',
+        classifier: (landmarks) => {
+          const thumbTip = landmarks[4];
+          const indexTip = landmarks[8];
+          const middleTip = landmarks[12];
+          const ringTip = landmarks[16];
+          const pinkyTip = landmarks[20];
+          
+          const isMiddleExtended = middleTip[1] < landmarks[10][1];
+          const isRingExtended = ringTip[1] < landmarks[14][1];
+          const isPinkyExtended = pinkyTip[1] < landmarks[18][1];
+          const isIndexExtended = indexTip[1] < landmarks[6][1];
+          
+          const dx = indexTip[0] - thumbTip[0];
+          const dy = indexTip[1] - thumbTip[1];
+          const circleDistance = Math.sqrt(dx * dx + dy * dy);
+          
+          return isMiddleExtended && isRingExtended && isPinkyExtended && 
+                 !isIndexExtended && circleDistance < 40;
+        }
       },
       fist: {
-        monkey: 'https://media1.tenor.com/m/mpPkmFDS7hEAAAAd/lion-monkey.gif',
-        human: 'https://placehold.co/400x400/374151/e5e7eb?text=Human+Fist!',
+        name: 'fist',
+        image: 'https://media1.tenor.com/m/mpPkmFDS7hEAAAAd/lion-monkey.gif',
+        classifier: (landmarks) => {
+          const thumbTip = landmarks[4];
+          const indexTip = landmarks[8];
+          const middleTip = landmarks[12];
+          const ringTip = landmarks[16];
+          const pinkyTip = landmarks[20];
+          
+          const isThumbCurled = thumbTip[0] > landmarks[5][0];
+          const isIndexCurled = indexTip[1] > landmarks[6][1];
+          const isMiddleCurled = middleTip[1] > landmarks[10][1];
+          const isRingCurled = ringTip[1] > landmarks[14][1];
+          const isPinkyCurled = pinkyTip[1] > landmarks[18][1];
+          
+          return isThumbCurled && isIndexCurled && isMiddleCurled && 
+                 isRingCurled && isPinkyCurled;
+        }
       },
-      paper: {
-        monkey: 'https://placehold.co/400x400/374151/e5e7eb?text=Monkey+Paper!',
-        human: 'https://placehold.co/400x400/374151/e5e7eb?text=Human+Paper!',
+      forks_up: {
+        name: 'forks_up',
+        image: 'https://sundevils.com/sites/default/files/styles/image/public/2025-05/Sparky-posing-football%20%281%29.png?itok=-kArX3nb',
+        classifier: (landmarks) => {
+          const thumbTip = landmarks[4];
+          const indexTip = landmarks[8];
+          const middleTip = landmarks[12];
+          const ringTip = landmarks[16];
+          const pinkyTip = landmarks[20];
+          
+          // Index, middle, and pinky extended (forks up)
+          const isPinkyExtended = pinkyTip[1] < landmarks[18][1];
+          const isIndexExtended = indexTip[1] < landmarks[6][1];
+          const isMiddleExtended = middleTip[1] < landmarks[10][1];
+          
+          // Ring and thumb curled
+          const isRingCurled = ringTip[1] > landmarks[14][1];
+          const isThumbCurled = thumbTip[0] > landmarks[5][0]; // Thumb curled inward
+          
+          return isPinkyExtended && isIndexExtended && isMiddleExtended && 
+                 isRingCurled && isThumbCurled;
+        }
       },
-      // You can add more gestures here
+      spiderman: {
+        name: 'spiderman',
+        image: 'https://preview.redd.it/bekphnqftcb41.jpg?width=1080&crop=smart&auto=webp&s=8f9410508e9179cbca41927644de18fa9e4c294c',
+        classifier: (landmarks) => {
+          const thumbTip = landmarks[4];
+          const indexTip = landmarks[8];
+          const middleTip = landmarks[12];
+          const ringTip = landmarks[16];
+          const pinkyTip = landmarks[20];
+          
+          // Pinkie, index, and thumb extended
+          const isPinkyExtended = pinkyTip[1] < landmarks[18][1];
+          const isIndexExtended = indexTip[1] < landmarks[6][1];
+          const isThumbExtended = Math.abs(thumbTip[0] - landmarks[2][0]) > 20; // Thumb extended outward
+          
+          // Middle and ring curled
+          const isMiddleCurled = middleTip[1] > landmarks[10][1];
+          const isRingCurled = ringTip[1] > landmarks[14][1];
+          
+          return isPinkyExtended && isIndexExtended && isThumbExtended && 
+                 isMiddleCurled && isRingCurled;
+        }
+      },
+      palm_horizontal: {
+        name: 'palm_horizontal',
+        image: 'https://t4.ftcdn.net/jpg/15/68/97/83/360_F_1568978321_JVKyawq58nNqd9mekQ4EEvm8MraRvVHZ.jpg',
+        classifier: (landmarks) => {
+          const indexTip = landmarks[8];
+          const middleTip = landmarks[12];
+          const ringTip = landmarks[16];
+          const pinkyTip = landmarks[20];
+          
+          // All fingers extended (palm open)
+          const isIndexExtended = indexTip[1] < landmarks[6][1];
+          const isMiddleExtended = middleTip[1] < landmarks[10][1];
+          const isRingExtended = ringTip[1] < landmarks[14][1];
+          const isPinkyExtended = pinkyTip[1] < landmarks[18][1];
+          
+          if (!(isIndexExtended && isMiddleExtended && isRingExtended && isPinkyExtended)) {
+            return false;
+          }
+          
+          // Check if all finger tips are close together in Y coordinate (hand is horizontal/flat)
+          const fingerTips = [indexTip[1], middleTip[1], ringTip[1], pinkyTip[1]];
+          const minY = Math.min(...fingerTips);
+          const maxY = Math.max(...fingerTips);
+          const ySpread = maxY - minY;
+          
+          // If all finger tips are within 30 pixels in Y coordinate, hand is horizontal
+          return ySpread < 30;
+        }
+      },
+      palm_open: {
+        name: 'palm_open',
+        image: 'https://substackcdn.com/image/fetch/$s_!qXa6!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fcb9540fa-b3b5-4790-9f8b-ae50925b6915_1920x1080.jpeg',
+        classifier: (landmarks) => {
+          const thumbTip = landmarks[4];
+          const indexTip = landmarks[8];
+          const middleTip = landmarks[12];
+          const ringTip = landmarks[16];
+          const pinkyTip = landmarks[20];
+          
+          // All fingers extended (palm open)
+          const isIndexExtended = indexTip[1] < landmarks[6][1];
+          const isMiddleExtended = middleTip[1] < landmarks[10][1];
+          const isRingExtended = ringTip[1] < landmarks[14][1];
+          const isPinkyExtended = pinkyTip[1] < landmarks[18][1];
+          
+          // Thumb extended outward
+          const isThumbExtended = Math.abs(thumbTip[0] - landmarks[2][0]) > 20;
+          
+          return isIndexExtended && isMiddleExtended && isRingExtended && 
+                 isPinkyExtended && isThumbExtended;
+        }
+      }
+      // Add more gestures here following the same pattern:
+      // new_gesture: {
+      //   name: 'new_gesture',
+      //   image: 'https://your-image-url.com/image.gif',
+      //   classifier: (landmarks) => {
+      //     // Your gesture detection logic
+      //     return true/false;
+      //   }
+      // }
     };
 
-    // Simplified classifier
+    // ============================================
+    // TWO-HAND GESTURE CONFIGURATION
+    // ============================================
+    // Gestures that require both hands
+    // ============================================
+    const TWO_HAND_GESTURE_CONFIG = {
+      both_palms_up: {
+        name: 'both_palms_up',
+        image: 'https://substackcdn.com/image/fetch/$s_!qXa6!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fcb9540fa-b3b5-4790-9f8b-ae50925b6915_1920x1080.jpeg',
+        classifier: (leftHandLandmarks, rightHandLandmarks) => {
+          // Helper function to check if all fingers are extended (palm up)
+          const isPalmUp = (landmarks) => {
+            const indexTip = landmarks[8];
+            const middleTip = landmarks[12];
+            const ringTip = landmarks[16];
+            const pinkyTip = landmarks[20];
+            
+            // All fingers extended (tips are higher than PIP joints)
+            const isIndexExtended = indexTip[1] < landmarks[6][1];
+            const isMiddleExtended = middleTip[1] < landmarks[10][1];
+            const isRingExtended = ringTip[1] < landmarks[14][1];
+            const isPinkyExtended = pinkyTip[1] < landmarks[18][1];
+            
+            // Thumb is tricky - for palm up, thumb should be extended outward
+            // We'll check if thumb tip is to the side (not curled inward)
+            const thumbTip = landmarks[4];
+            const thumbMCP = landmarks[2];
+            const isThumbExtended = Math.abs(thumbTip[0] - thumbMCP[0]) > 20;
+            
+            return isIndexExtended && isMiddleExtended && isRingExtended && 
+                   isPinkyExtended && isThumbExtended;
+          };
+          
+          // Both hands must have palms up
+          return isPalmUp(leftHandLandmarks) && isPalmUp(rightHandLandmarks);
+        }
+      }
+      // Add more two-hand gestures here:
+      // new_two_hand_gesture: {
+      //   name: 'new_two_hand_gesture',
+      //   image: 'https://your-image-url.com/image.gif',
+      //   classifier: (leftHandLandmarks, rightHandLandmarks) => {
+      //     // Your two-hand detection logic
+      //     return true/false;
+      //   }
+      // }
+    };
+
+    // Classify single-hand gesture using the configuration
     const classifyGesture = (landmarks) => {
       try {
-        const thumbTip = landmarks[4];
-        const indexTip = landmarks[8];
-        const middleTip = landmarks[12];
-        const ringTip = landmarks[16];
-        const pinkyTip = landmarks[20];
-        
-        // --- Check for extended fingers (Y coordinate smaller = higher on screen) ---
-        const isIndexExtended = indexTip[1] < landmarks[6][1]; // Compare to PIP
-        const isMiddleExtended = middleTip[1] < landmarks[10][1]; // Compare to PIP
-        const isRingExtended = ringTip[1] < landmarks[14][1]; // Compare to PIP
-        const isPinkyExtended = pinkyTip[1] < landmarks[18][1]; // Compare to PIP
-
-        // --- Check for curled fingers (Y coordinate larger = lower on screen) ---
-        const isThumbCurled = thumbTip[0] > landmarks[5][0]; 
-        const isIndexCurled = indexTip[1] > landmarks[6][1]; 
-        const isMiddleCurled = middleTip[1] > landmarks[10][1]; 
-        const isRingCurled = ringTip[1] > landmarks[14][1]; 
-        const isPinkyCurled = pinkyTip[1] > landmarks[18][1]; 
-
-        // --- Check for distance between thumb and index finger ---
-        const dx = indexTip[0] - thumbTip[0];
-        const dy = indexTip[1] - thumbTip[1];
-        const circleDistance = Math.sqrt(dx * dx + dy * dy);
-
-        // --- 'OK Sign' Logic ---
-        // Middle, ring, and pinky extended, with index/thumb in a circle
-        if (
-          isMiddleExtended && 
-          isRingExtended && 
-          isPinkyExtended && 
-          !isIndexExtended && // Index finger should be curled
-          circleDistance < 40 // Check if index and thumb tips are close
-        ) { 
-          return 'ok_sign';
+        for (const [key, config] of Object.entries(GESTURE_CONFIG)) {
+          if (config.classifier(landmarks)) {
+            return key;
+          }
         }
-
-        // --- 'Point' Logic ---
-        // Index finger extended, all others curled
-        if (
-          isThumbCurled &&
-          isIndexExtended &&
-          isMiddleCurled &&
-          isRingCurled &&
-          isPinkyCurled
-        ) {
-          return 'point'; // Trigger 'point' event
-        }
-
-        // --- 'Fist' Logic ---
-        // All fingers curled
-        if (
-          isThumbCurled &&
-          isIndexCurled &&
-          isMiddleCurled &&
-          isRingCurled &&
-          isPinkyCurled
-        ) {
-          return 'fist';
-        }
-
-        // --- 'C Logic' ---
-        // All fingers slightly curled
-
-        
-
       } catch (e) {
-        // Landmarks might be incomplete
-        // console.error(e);
+        console.error('Gesture classification error:', e);
+      }
+      return null;
+    };
+
+    // Classify two-hand gesture using the configuration
+    const classifyTwoHandGesture = (leftHandLandmarks, rightHandLandmarks) => {
+      try {
+        for (const [key, config] of Object.entries(TWO_HAND_GESTURE_CONFIG)) {
+          if (config.classifier(leftHandLandmarks, rightHandLandmarks)) {
+            return key;
+          }
+        }
+      } catch (e) {
+        console.error('Two-hand gesture classification error:', e);
       }
       return null;
     };
@@ -171,68 +346,59 @@
     function App() {
       const [handposeModel, setHandposeModel] = useState(null);
       const [isTracking, setIsTracking] = useState(false);
-      const [foundGesture, setFoundGesture] = useState('default');
+      const [detectedGesture, setDetectedGesture] = useState(null);
       const [handStatus, setHandStatus] = useState('None');
+      const [handsDetected, setHandsDetected] = useState(0);
       const [isModelReady, setIsModelReady] = useState(false);
       const [librariesLoaded, setLibrariesLoaded] = useState(false);
       const [libraryError, setLibraryError] = useState(null);
-      const [handLandmarks, setHandLandmarks] = useState([]);
-      const [imageSubject, setImageSubject] = useState('monkey'); 
       
       const webcamRef = useRef(null);
       const canvasRef = useRef(null);
       const rafId = useRef(null);
       const lastGestureAction = useRef(null);
-      const okSoundRef = useRef(null); // Ref for our audio file
+      const okSoundRef = useRef(null);
       
-      // Get libraries from the window object
       const Webcam = window.Webcam;
       const tf = window.tf;
       const handpose = window.handpose;
 
-      // 0. Check if libraries are loaded from window
+      // Load libraries
       useEffect(() => {
-        // Give libraries a moment to load
         setTimeout(() => {
-         if (window.Webcam && window.tf && window.handpose) {
+          if (window.Webcam && window.tf && window.handpose) {
             setLibrariesLoaded(true);
-            console.log('Libraries loaded from window object.');
-
-           // Initialize audio object
-           okSoundRef.current = new Audio('https://audio.jukehost.co.uk/16BXpbuI9FZWVlb8Uwm5zF1cJrHHfwGW');
-           okSoundRef.current.preload = 'auto'; // Tell the browser to start loading the audio
+            okSoundRef.current = new Audio('https://audio.jukehost.co.uk/16BXpbuI9FZWVlb8Uwm5zF1cJrHHfwGW');
+            okSoundRef.current.preload = 'auto';
           } else {
             const missing = [
               !window.Webcam ? 'ReactWebcam' : '',
-              !window.tf ? 'TensorFlow (tf.js)' : '',
+              !window.tf ? 'TensorFlow' : '',
               !window.handpose ? 'Handpose' : '',
             ].filter(Boolean).join(', ');
-            console.error('Failed to load libraries from window:', missing);
-            setLibraryError(`Error: Could not load libraries: ${missing}. Check script tags.`);
+            setLibraryError(`Could not load: ${missing}`);
           }
-        }, 500); 
+        }, 500);
       }, []);
 
-      // 1. Load TensorFlow and the Handpose model
+      // Load model
       useEffect(() => {
-        if (!librariesLoaded) return; 
+        if (!librariesLoaded) return;
         async function loadModel() {
-          console.log('Loading TF.js and Handpose model...');
           try {
             await tf.ready();
             const model = await handpose.load();
             setHandposeModel(model);
             setIsModelReady(true);
-            console.log('Model loaded successfully.');
           } catch (err) {
-            console.error("Failed to load model or TF.js", err);
+            console.error("Failed to load model", err);
             setLibraryError("Failed to load AI model.");
           }
         }
         loadModel();
       }, [librariesLoaded, tf, handpose]);
 
-      // 2. Cleanup function to cancel animation frames
+      // Cleanup
       useEffect(() => {
         return () => {
           if (rafId.current) {
@@ -241,57 +407,54 @@
         };
       }, []);
 
-      // Function to draw landmarks on canvas
+      // Draw hand landmarks
       const drawHand = useCallback((predictions) => {
-        const ctx = canvasRef.current.getContext('2d');
-        ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height); 
+        const ctx = canvasRef.current?.getContext('2d');
+        if (!ctx || !canvasRef.current) return;
+        
+        ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
         
         if (predictions.length > 0) {
-          predictions.forEach((prediction) => {
+          // Log number of hands detected for debugging
+          if (predictions.length > 1) {
+            console.log(`Detected ${predictions.length} hands`);
+          }
+          
+          predictions.forEach((prediction, handIndex) => {
             const landmarks = prediction.landmarks;
-            setHandLandmarks(landmarks); // Store for state if needed
 
-            // 1. Draw Lines (Skeleton)
-            ctx.strokeStyle = '#00FF00'; // Green
+            // Draw skeleton - different colors for each hand
+            ctx.strokeStyle = handIndex === 0 ? '#34A853' : '#EA4335'; // Green for first hand, red for second
             ctx.lineWidth = 2;
-            for (let i = 0; i < handConnections.length; i++) {
-              const [startIdx, endIdx] = handConnections[i];
-              const startPoint = landmarks[startIdx];
-              const endPoint = landmarks[endIdx];
-              
+            handConnections.forEach(([startIdx, endIdx]) => {
+              const start = landmarks[startIdx];
+              const end = landmarks[endIdx];
               ctx.beginPath();
-              ctx.moveTo(startPoint[0], startPoint[1]);
-              ctx.lineTo(endPoint[0], endPoint[1]);
+              ctx.moveTo(start[0], start[1]);
+              ctx.lineTo(end[0], end[1]);
               ctx.stroke();
-            }
+            });
 
-            // 2. Draw Points (Joints)
-            ctx.fillStyle = '#FF00FF'; // Magenta
-            ctx.strokeStyle = '#FFFFFF'; // White border
+            // Draw joints - different colors for each hand
+            ctx.fillStyle = handIndex === 0 ? '#4285F4' : '#FBBC05'; // Blue for first hand, yellow for second
+            ctx.strokeStyle = '#FFFFFF';
             ctx.lineWidth = 1;
-            for (let i = 0; i < landmarks.length; i++) {
-              const x = landmarks[i][0];
-              const y = landmarks[i][1];
+            landmarks.forEach(([x, y]) => {
               ctx.beginPath();
-              ctx.arc(x, y, 5, 0, 2 * Math.PI); 
+              ctx.arc(x, y, 4, 0, 2 * Math.PI);
               ctx.fill();
               ctx.stroke();
-            }
+            });
           });
-        } else {
-          setHandLandmarks([]); 
         }
-      }, []); // handConnections is constant, no need to add as dependency
+      }, []);
 
-
-      // 3. The main tracking loop
+      // Main detection loop
       const detectionLoop = useCallback(async () => {
         if (
           isTracking &&
           handposeModel &&
-          webcamRef.current &&
-          webcamRef.current.video &&
-          webcamRef.current.video.readyState === 4
+          webcamRef.current?.video?.readyState === 4
         ) {
           const video = webcamRef.current.video;
           const videoWidth = video.videoWidth;
@@ -303,58 +466,100 @@
           }
 
           try {
-            // FIX: Removed flipHorizontal (true) from here. Let CSS handle the flip.
-            const predictions = await handposeModel.estimateHands(video, false); 
+            // Try detecting hands - Handpose should detect multiple if visible
+            const predictions = await handposeModel.estimateHands(video, false);
+
+            // Update hands detected count
+            setHandsDetected(predictions.length);
+            
+            // Detailed logging for debugging multi-hand detection
+            console.log(`[DEBUG] Total predictions: ${predictions.length}`);
+            if (predictions.length > 0) {
+              predictions.forEach((pred, idx) => {
+                const handedness = pred.handedness || 'Unknown';
+                const confidence = pred.handInViewConfidence !== undefined ? pred.handInViewConfidence : 'N/A';
+                console.log(`[DEBUG] Hand ${idx + 1}: ${handedness}, confidence: ${confidence}, landmarks: ${pred.landmarks.length}`);
+              });
+            } else {
+              console.log('[DEBUG] No hands detected - check camera positioning and lighting');
+            }
 
             if (predictions.length > 0) {
-              const hand = predictions[0];
-              // setDetectedHand(hand.handedness || 'Found hand'); // Old line
-              const gesture = classifyGesture(hand.landmarks);
+              drawHand(predictions);
               
-              drawHand(predictions); 
+              let detectedGesture = null;
+              let gestureConfig = null;
               
-              if (gesture === 'point') { 
-                setFoundGesture('point');
-                setHandStatus('Point');
-                if (lastGestureAction.current !== 'point') {
-                  // Speech code removed
-                  lastGestureAction.current = 'point';
+              // Check for two-hand gestures first (if 2 hands detected)
+              if (predictions.length >= 2) {
+                // Determine which hand is left and which is right
+                // Handpose provides handedness info, but we'll use position as fallback
+                const hand1 = predictions[0];
+                const hand2 = predictions[1];
+                
+                // Use handedness if available, otherwise use x position
+                let leftHand, rightHand;
+                if (hand1.handedness === 'Left' || hand1.handedness === 'left') {
+                  leftHand = hand1;
+                  rightHand = hand2;
+                } else if (hand2.handedness === 'Left' || hand2.handedness === 'left') {
+                  leftHand = hand2;
+                  rightHand = hand1;
+                } else {
+                  // Fallback: use x position (left hand is typically on left side of screen)
+                  leftHand = hand1.landmarks[0][0] < hand2.landmarks[0][0] ? hand1 : hand2;
+                  rightHand = hand1.landmarks[0][0] < hand2.landmarks[0][0] ? hand2 : hand1;
                 }
-              } else if (gesture === 'ok_sign') {
-                setFoundGesture('default'); 
-                setHandStatus('OK Sign');
-                if (lastGestureAction.current !== 'ok_sign' && okSoundRef.current) {
-                  // Play the audio file
-                  okSoundRef.current.currentTime = 0; 
-                  okSoundRef.current.play().catch(e => console.error("Audio play failed:", e)); 
-                  lastGestureAction.current = 'ok_sign';
+                
+                const twoHandGesture = classifyTwoHandGesture(leftHand.landmarks, rightHand.landmarks);
+                if (twoHandGesture && TWO_HAND_GESTURE_CONFIG[twoHandGesture]) {
+                  detectedGesture = twoHandGesture;
+                  gestureConfig = TWO_HAND_GESTURE_CONFIG[twoHandGesture];
                 }
-              } else if (gesture === 'fist') {
-                setFoundGesture('fist');
-                setHandStatus('Fist');
-                if (lastGestureAction.current !== 'fist') {
-                  lastGestureAction.current = 'fist';
+              }
+              
+              // If no two-hand gesture detected, check single-hand gestures
+              if (!detectedGesture) {
+                const hand = predictions[0];
+                const singleHandGesture = classifyGesture(hand.landmarks);
+                if (singleHandGesture && GESTURE_CONFIG[singleHandGesture]) {
+                  detectedGesture = singleHandGesture;
+                  gestureConfig = GESTURE_CONFIG[singleHandGesture];
+                }
+              }
+              
+              if (detectedGesture && gestureConfig) {
+                setDetectedGesture(detectedGesture);
+                setHandStatus(gestureConfig.name.replace('_', ' ').toUpperCase());
+                
+                if (lastGestureAction.current !== detectedGesture) {
+                  if (detectedGesture === 'ok_sign' && okSoundRef.current) {
+                    okSoundRef.current.currentTime = 0;
+                    okSoundRef.current.play().catch(e => console.error("Audio play failed:", e));
+                  }
+                  lastGestureAction.current = detectedGesture;
                 }
               } else {
-                setFoundGesture('default');
+                setDetectedGesture(null);
                 setHandStatus('Detected');
                 lastGestureAction.current = null;
               }
             } else {
               setHandStatus('None');
-              setFoundGesture('default');
+              setDetectedGesture(null);
+              setHandsDetected(0);
               lastGestureAction.current = null;
-              drawHand([]); 
+              drawHand([]);
             }
           } catch (error) {
-            console.error('Handpose prediction error:', error);
+            console.error('Detection error:', error);
             setHandStatus('None');
-            drawHand([]); 
+            setDetectedGesture(null);
+            setHandsDetected(0);
+            drawHand([]);
           }
 
-          if(rafId.current) {
-             rafId.current = requestAnimationFrame(detectionLoop);
-          }
+          rafId.current = requestAnimationFrame(detectionLoop);
         } else if (isTracking) {
           rafId.current = requestAnimationFrame(detectionLoop);
         } else {
@@ -363,17 +568,15 @@
             ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
           }
         }
-      }, [isTracking, handposeModel, drawHand]); 
+      }, [isTracking, handposeModel, drawHand]);
 
-      // Start/Stop tracking
+      // Toggle tracking
       const toggleTracking = () => {
         if (!isTracking) {
-          // Play a silent audio to activate audio context
-          if(okSoundRef.current) {
+          if (okSoundRef.current) {
             okSoundRef.current.muted = true;
             okSoundRef.current.play().then(() => {
               okSoundRef.current.muted = false;
-              console.log('Audio context started');
             }).catch(e => {});
           }
           setIsTracking(true);
@@ -384,13 +587,13 @@
             rafId.current = null;
           }
           setHandStatus('None');
-          setFoundGesture('default');
-          setHandLandmarks([]); 
+          setDetectedGesture(null);
+          setHandsDetected(0);
           lastGestureAction.current = null;
         }
       };
-      
-      // Effect to manage the animation frame loop
+
+      // Manage animation frame loop
       useEffect(() => {
         if (isTracking && isModelReady) {
           rafId.current = requestAnimationFrame(detectionLoop);
@@ -405,146 +608,164 @@
             cancelAnimationFrame(rafId.current);
             rafId.current = null;
           }
-        }
+        };
       }, [isTracking, isModelReady, detectionLoop]);
 
-      // --- Render Logic ---
-
+      // Error states
       if (libraryError) {
         return (
-          <div className="flex flex-col min-h-screen items-center justify-center bg-gray-900 text-gray-200 p-8 font-sans">
-            <span className="text-3xl font-bold text-red-500 mb-6">Error</span>
-            <div className="w-full max-w-lg bg-gray-800 rounded-lg p-6 border-l-4 border-red-500">
-              <span className="text-xl font-semibold text-red-400 block mb-2">Library Load Error</span>
-              <span className="text-gray-300">{libraryError}</span>
+          <div className="flex flex-col min-h-screen items-center justify-center bg-white text-[#202124] p-8">
+            <div className="text-4xl font-bold text-[#EA4335] mb-6">Error</div>
+            <div className="w-full max-w-lg bg-[#F8F9FA] rounded-lg p-6 border-l-4 border-[#EA4335] shadow-md">
+              <div className="text-xl font-semibold text-[#EA4335] mb-2">Library Load Error</div>
+              <div className="text-[#5F6368]">{libraryError}</div>
             </div>
           </div>
         );
       }
-      
+
       if (!librariesLoaded) {
-         return (
-          <div className="flex flex-col min-h-screen items-center justify-center bg-gray-900 text-gray-200 p-8 font-sans">
-            <div className="flex items-center space-x-2">
-              <svg className="animate-spin h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        return (
+          <div className="flex flex-col min-h-screen items-center justify-center bg-white text-[#202124]">
+            <div className="flex items-center space-x-3">
+              <svg className="animate-spin h-8 w-8 text-[#4285F4]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              <span className="text-xl font-medium text-gray-400">Loading Core Libraries...</span>
+              <span className="text-xl font-medium text-[#5F6368]">Loading Libraries...</span>
             </div>
           </div>
         );
       }
 
-      // Determine the image to display
-      const currentGestureImage = gestureImages[foundGesture] ? gestureImages[foundGesture][imageSubject] : gestureImages.default[imageSubject];
+      // Get gesture config from either single-hand or two-hand configs
+      const currentGesture = detectedGesture 
+        ? (GESTURE_CONFIG[detectedGesture] || TWO_HAND_GESTURE_CONFIG[detectedGesture])
+        : null;
+      const currentGestureImage = currentGesture 
+        ? currentGesture.image 
+        : 'https://placehold.co/600x600/F8F9FA/E8EAED?text=Show+a+Hand+Sign';
 
-      // Render the main app
       return (
-        <div className="flex flex-col min-h-screen items-center bg-gray-900 text-gray-200 p-4 md:p-8 font-sans">
-          <span className="text-2xl md:text-3xl font-bold text-gray-200 mb-6">Brainrot Detector</span>
-          
-          <div className="flex flex-col md:flex-row w-full max-w-4xl justify-around mb-6 space-y-4 md:space-y-0 md:space-x-4">
-            
-            {/* Box 1: Camera and Processing */}
-            <div className="flex flex-col items-center bg-gray-800 rounded-xl border border-gray-700 p-4 w-full md:w-1/2 h-[350px] shadow-lg">
-              <span className="text-lg font-semibold text-gray-300 mb-2">Processing</span>
-              {!isModelReady && librariesLoaded && (
-                <div className="flex-1 flex flex-col items-center justify-center h-full">
-                  <svg className="animate-spin h-5 w-5 text-blue-400 mb-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  <span className="text-gray-400">Loading AI Model...</span>
-                </div>
-              )}
-              {isModelReady && Webcam && (
-                <div className="w-full h-[250px] rounded-lg overflow-hidden relative bg-gray-900">
-                  <Webcam
-                    ref={webcamRef}
-                    audio={false}
-                    className="webcam-canvas-overlay" /* REMOVED object-cover */
-                    mirrored={true}
-                    videoConstraints={{ width: 400, height: 250, facingMode: "user" }}
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                    }}
-                  />
-                  {/* Canvas for drawing landmarks */}
-                  <canvas 
-                    ref={canvasRef} 
-                    className="webcam-canvas-overlay z-10"
-                    style={{ 
-                      transform: 'scaleX(-1)', /* FIX: Mirror canvas to match video */
-                      width: '100%',
-                      height: '100%',
-                    }} 
-                  ></canvas>
-                  <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 p-2 rounded-md text-sm">
-                    <span className="text-white block">Tracking: {isTracking ? 'ON' : 'OFF'}</span>
-                    <span className="text-white block">Hand: {handStatus}</span>
+        <div className="flex flex-col min-h-screen items-center bg-white text-[#202124] p-4">
+          {/* Header */}
+          <div className="text-center mb-6">
+            <h1 className="text-4xl md:text-5xl font-bold mb-2 bg-gradient-to-r from-[#4285F4] via-[#EA4335] to-[#FBBC05] bg-clip-text text-transparent">
+              Brainrot Detector
+            </h1>
+            <p className="text-[#5F6368] text-sm">Make a gesture to see the meme!</p>
+          </div>
+
+          {/* Main Content - Side by Side */}
+          <div className="flex flex-col md:flex-row w-full max-w-7xl gap-6 mb-6">
+            {/* Left: Webcam View */}
+            <div className="flex-1">
+              <div className="relative w-full aspect-video bg-[#F8F9FA] rounded-2xl overflow-hidden shadow-2xl border-2 border-[#E8EAED]">
+                {!isModelReady && librariesLoaded && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-white">
+                    <svg className="animate-spin h-8 w-8 text-[#4285F4] mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span className="text-[#5F6368]">Loading AI Model...</span>
                   </div>
-                </div>
-              )}
+                )}
+                
+                {isModelReady && Webcam && (
+                  <div className="webcam-container">
+                    <Webcam
+                      ref={webcamRef}
+                      audio={false}
+                      mirrored={true}
+                      videoConstraints={{ width: 1280, height: 720, facingMode: "user" }}
+                      className="w-full h-full object-cover"
+                    />
+                    
+                    {/* Hand landmarks canvas */}
+                    <canvas 
+                      ref={canvasRef} 
+                      className="webcam-overlay z-10"
+                      style={{ transform: 'scaleX(-1)' }}
+                    />
+                    
+                    {/* Status overlay */}
+                    <div className="absolute bottom-4 left-4 bg-white bg-opacity-90 backdrop-blur-sm px-4 py-2 rounded-lg border border-[#E8EAED] shadow-md">
+                      <div className="flex items-center space-x-3">
+                        <div className={`w-3 h-3 rounded-full ${isTracking ? 'bg-[#34A853] animate-pulse' : 'bg-[#EA4335]'}`}></div>
+                        <div>
+                          <div className="text-xs text-[#5F6368]">Status</div>
+                          <div className="text-sm font-semibold text-[#202124]">{handStatus}</div>
+                          {handsDetected > 0 && (
+                            <div className="text-xs text-[#5F6368] mt-1">
+                              {handsDetected} hand{handsDetected !== 1 ? 's' : ''} detected
+                            </div>
+                          )}
+                          {handsDetected === 1 && isTracking && (
+                            <div className="text-xs text-[#FBBC05] mt-1 italic">
+                              Tip: Spread hands apart for better detection
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Box 2: Image Generation */}
-            <div className="flex flex-col items-center bg-gray-800 rounded-xl border border-gray-700 p-4 w-full md:w-1/2 h-[350px] shadow-lg">
-              <span className="text-lg font-semibold text-gray-300 mb-2">Image Generation</span>
-              <div className="w-full h-[250px] flex items-center justify-center bg-gray-700 rounded-lg relative">
+            {/* Right: Image Display */}
+            <div className="flex-1">
+              <div className="relative w-full aspect-video bg-[#F8F9FA] rounded-2xl overflow-hidden shadow-2xl border-2 border-[#E8EAED] flex items-center justify-center">
                 <img
                   src={currentGestureImage}
-                  alt="Detected gesture"
-                  className="max-w-full max-h-full rounded-lg object-contain"
+                  alt={currentGesture ? currentGesture.name : 'Default'}
+                  className="max-w-full max-h-full object-contain rounded-lg"
                 />
-                <div className="absolute top-2 right-2 flex space-x-2">
-                  <button
-                    onClick={() => setImageSubject('monkey')}
-                    className={`px-3 py-1 text-xs rounded-full transition-all ${imageSubject === 'monkey' ? 'bg-blue-500 text-white' : 'bg-gray-600 text-gray-300 hover:bg-gray-500'}`}
-                  >
-                    Monkey
-                  </button>
-                  <button
-                    onClick={() => setImageSubject('human')}
-                    className={`px-3 py-1 text-xs rounded-full transition-all ${imageSubject === 'human' ? 'bg-blue-500 text-white' : 'bg-gray-600 text-gray-300 hover:bg-gray-500'}`}
-                  >
-                    Human
-                  </button>
-                </div>
               </div>
             </div>
           </div>
 
+          {/* Control Button */}
           <button
-            className={`px-8 py-3 text-lg font-bold text-white rounded-full transition-all duration-300 transform hover:scale-105 ${
+            className={`px-10 py-4 text-lg font-bold text-white rounded-full transition-all duration-300 transform hover:scale-105 shadow-lg ${
               isModelReady 
-                ? 'bg-blue-600 hover:bg-blue-700 shadow-lg hover:shadow-blue-500/50' 
-                : 'bg-gray-600 cursor-not-allowed opacity-50'
+                ? 'bg-[#4285F4] hover:bg-[#357ae8] hover:shadow-[#4285F4]/50' 
+                : 'bg-[#5F6368] cursor-not-allowed opacity-50'
             }`}
             onClick={toggleTracking}
             disabled={!isModelReady}
           >
-            {isTracking ? 'Stop Tracking' : 'Start Tracking'}
+            {isTracking ? '⏸ Stop Tracking' : '▶ Start Tracking'}
           </button>
 
-          <div className="w-full max-w-4xl bg-gray-800 rounded-lg p-4 border-l-4 border-yellow-500 mt-8 shadow-lg">
-            <span className="text-lg font-semibold text-yellow-400 block mb-2">Engineer's Note:</span>
-            <span className="text-gray-300 text-sm">
-              This is a proof-of-concept. The "Sign Language" detection is a simple
-              classifier. A true sign language app
-              requires a much more advanced AI model. The image search is
-              simulated with placeholder URLs.
-            </span>
+          {/* Gesture Info */}
+          {currentGesture && (
+            <div className="mt-6 w-full max-w-7xl bg-[#F8F9FA] rounded-lg p-4 border-l-4 border-[#4285F4] shadow-sm">
+              <div className="text-sm text-[#5F6368]">
+                <span className="font-semibold text-[#4285F4]">Detected: </span>
+                <span className="text-[#202124]">{currentGesture.name.replace('_', ' ').toUpperCase()}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Instructions */}
+          <div className="mt-8 w-full max-w-7xl bg-[#F8F9FA] rounded-lg p-6 border border-[#E8EAED] shadow-sm">
+            <div className="text-lg font-semibold text-[#FBBC05] mb-3">How to Use:</div>
+            <ul className="text-sm text-[#5F6368] space-y-2">
+              <li>• Click "Start Tracking" to begin</li>
+              <li>• Make a gesture with your hand(s)</li>
+              <li>• The meme image will appear on the right!</li>
+              <li>• Single-hand: Point, OK Sign, Fist, Palm Open, Palm Horizontal, Forks Up, or Spiderman</li>
+              <li>• Two-hand: Both Palms Up</li>
+            </ul>
           </div>
         </div>
       );
     }
-    
+
     // Mount the app
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(React.createElement(App));
-
   </script>
 </body>
 </html>
