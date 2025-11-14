@@ -254,6 +254,93 @@
           return isIndexExtended && isMiddleExtended && isRingExtended && 
                  isPinkyExtended && isThumbExtended;
         }
+      },
+      pen_writing: {
+        name: 'pen_writing',
+        image: 'https://i.kym-cdn.com/entries/icons/original/000/041/528/Young_Thug_-_Hot_ft._Gunna___Travis_Scott__Official_Music_Video__0-29_screenshot.png',
+        classifier: (landmarks) => {
+          const thumbTip = landmarks[4];
+          const indexTip = landmarks[8];
+          const middleTip = landmarks[12];
+          const ringTip = landmarks[16];
+          const pinkyTip = landmarks[20];
+          
+          // Thumb, index, and middle should be extended
+          const isThumbExtended = thumbTip[1] < landmarks[3][1] || Math.abs(thumbTip[0] - landmarks[2][0]) > 15;
+          const isIndexExtended = indexTip[1] < landmarks[6][1];
+          const isMiddleExtended = middleTip[1] < landmarks[10][1];
+          
+          // Ring and pinky should be curled
+          const isRingCurled = ringTip[1] > landmarks[14][1];
+          const isPinkyCurled = pinkyTip[1] > landmarks[18][1];
+          
+          // Check if thumb, index, and middle are close together (connected)
+          const thumbToIndex = Math.sqrt(
+            Math.pow(thumbTip[0] - indexTip[0], 2) + 
+            Math.pow(thumbTip[1] - indexTip[1], 2)
+          );
+          const indexToMiddle = Math.sqrt(
+            Math.pow(indexTip[0] - middleTip[0], 2) + 
+            Math.pow(indexTip[1] - middleTip[1], 2)
+          );
+          const thumbToMiddle = Math.sqrt(
+            Math.pow(thumbTip[0] - middleTip[0], 2) + 
+            Math.pow(thumbTip[1] - middleTip[1], 2)
+          );
+          
+          // Fingers should be within 60 pixels of each other (adjustable threshold)
+          const fingersConnected = thumbToIndex < 60 && indexToMiddle < 60 && thumbToMiddle < 80;
+          
+          return isThumbExtended && isIndexExtended && isMiddleExtended && 
+                 isRingCurled && isPinkyCurled && fingersConnected;
+        }
+      },
+      pray: {
+        name: 'pray',
+        image: 'https://media.tenor.com/NZHXnTwS5pEAAAAM/please7tv-please.gif',
+        classifier: (landmarks) => {
+          const thumbTip = landmarks[4];
+          const indexTip = landmarks[8];
+          const middleTip = landmarks[12];
+          const ringTip = landmarks[16];
+          const pinkyTip = landmarks[20];
+          
+          // All fingers should be extended upward (tips are higher than their PIP joints)
+          const isIndexExtended = indexTip[1] < landmarks[6][1];
+          const isMiddleExtended = middleTip[1] < landmarks[10][1];
+          const isRingExtended = ringTip[1] < landmarks[14][1];
+          const isPinkyExtended = pinkyTip[1] < landmarks[18][1];
+          
+          if (!(isIndexExtended && isMiddleExtended && isRingExtended && isPinkyExtended)) {
+            return false;
+          }
+          
+          // For praying hands, fingers should be close together (tips are close in X coordinate)
+          const fingerTips = [indexTip, middleTip, ringTip, pinkyTip];
+          const xPositions = fingerTips.map(tip => tip[0]);
+          const minX = Math.min(...xPositions);
+          const maxX = Math.max(...xPositions);
+          const xSpread = maxX - minX;
+          
+          // Fingers should be close together (within 50 pixels in X)
+          const fingersClose = xSpread < 50;
+          
+          // Fingers should also be close in Y (within 40 pixels) - all pointing up together
+          const yPositions = fingerTips.map(tip => tip[1]);
+          const minY = Math.min(...yPositions);
+          const maxY = Math.max(...yPositions);
+          const ySpread = maxY - minY;
+          const fingersAligned = ySpread < 40;
+          
+          // Thumb can be extended or slightly curled, but should be near the index finger
+          const thumbToIndex = Math.sqrt(
+            Math.pow(thumbTip[0] - indexTip[0], 2) + 
+            Math.pow(thumbTip[1] - indexTip[1], 2)
+          );
+          const thumbClose = thumbToIndex < 80;
+          
+          return fingersClose && fingersAligned && thumbClose;
+        }
       }
       // Add more gestures here following the same pattern:
       // new_gesture: {
@@ -755,7 +842,7 @@
               <li>• Click "Start Tracking" to begin</li>
               <li>• Make a gesture with your hand(s)</li>
               <li>• The meme image will appear on the right!</li>
-              <li>• Single-hand: Point, OK Sign, Fist, Palm Open, Palm Horizontal, Forks Up, or Spiderman</li>
+              <li>• Single-hand: Point, OK Sign, Fist, Palm Open, Palm Horizontal, Forks Up, Spiderman, Pen Writing, or Pray</li>
               <li>• Two-hand: Both Palms Up</li>
             </ul>
           </div>
